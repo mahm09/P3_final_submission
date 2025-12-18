@@ -1,6 +1,6 @@
 # ==============================================================================
 # DISCLAIMER:
-# The boilerplate for this script was written with the help of AI.
+# Part of this code was written with the help of AI.
 # It was reviewed, tested, and modified by the project group to suit 
 # project-specific data structures and requirements.
 # ==============================================================================
