@@ -1,7 +1,9 @@
 # Computer Vision Model Comparison: YOLOv8 vs Faster R-CNN vs MobileNet
 
 ## Project Overview
-This repository contains the final implementation and trained models for a comparative study of object detection and pose estimation architectures. The project evaluates the performance difference between single-stage detectors (YOLOv8) and two-stage detectors (Faster R-CNN with a MobileNetV2 backbone (itself with a MediaPipe wrist cropping system)).
+This repository contains the final implementation and trained models for a comparative study of object detection and pose estimation architectures. The project evaluates the performance difference between single-stage detectors (YOLOv8) and two-stage detectors (Faster R-CNN with a MobileNetV2 backbone (itself with a MediaPipe wrist cropping system)). During the project, another repository was used. This was cleaned up for submission, with some testing files, the dataset, and various other programs not making the final cut. As a result, it is possible that the programs do not currently have full functionality, as they did in our working project folder. These programs are merely intended to showcase the implementation.
+
+The repository also contains a folder with an example implementation of the deployment method described in the report, with it's own requirements.txt file, a sample image to try, and a sample result recieved from the API server, among other things. The Docker server host must be running for this to work.
 
 ## Included Models
 The `P3_Final_Submission` folder includes the best-performing weights from our training sessions:
@@ -18,7 +20,7 @@ The `P3_Final_Submission` folder includes the best-performing weights from our t
     pip install -r requirements.txt
     ```
 
-## Key Scripts & Usage
+## Key Scripts
 
 ### 1. Training & Inference
 * **`yolotrain.py`**: Script used to train the YOLOv8 model on the dataset.
@@ -26,8 +28,7 @@ The `P3_Final_Submission` folder includes the best-performing weights from our t
 * **`pose-mobilnet.py` / `pose-mobilnet_v2.py`**: Scripts for running the MobileNet-based pose estimation pipeline.
 
 ### 2. Visualization & Analysis
-* **`generate_advanced_plots.py`**: Generates comprehensive performance graphs (Confusion Matrices, Precision-Recall curves, Loss curves) comparing the models.
-* **`plot_results.py`**: Helper script to visualize specific detection results.
+* **`plot_results.py`**: Example helper script to visualize specific detection results.
 
 ### Example Usage
 To run the advanced plotting script:
