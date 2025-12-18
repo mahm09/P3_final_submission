@@ -13,10 +13,13 @@ import os
 import xml.etree.ElementTree as ET
 from tqdm import tqdm
 
-# ================= CONFIG =================
+# ================= CONFIGURATION =================
+# ### Checks for GPU availability and sets file paths. 
+# ### Note: Ensure 'MODEL_PATH' matches where your file actually is (e.g., 'faster_rcnn/best_frcnn.pth')
 MODEL_PATH = "frcnn_output/best_model.pth"
 IMG_DIR = "billeddata/val/images"
-# Try to find where annotations are
+
+# ### Auto-detects if you are using YOLO labels (.txt) or XML annotations
 if os.path.exists("billeddata/val/labels"):
     LABEL_DIR = "billeddata/val/labels" # YOLO format
     LABEL_TYPE = "txt"
@@ -27,9 +30,14 @@ else:
 CSV_PATH = "frcnn_output/training_losses.csv"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 IOU_THRESHOLD = 0.5
-# ==========================================
+# ===============================================
 
 class GunDataset(torch.utils.data.Dataset):
+    """
+    ### Custom Dataset Loader
+    ### This class handles finding images and converting label files (XML or TXT) 
+    ### into the format PyTorch expects (boxes: [xmin, ymin, xmax, ymax]).
+    """
     def __init__(self, img_dir, label_dir, label_type):
         self.img_dir = img_dir
         self.label_dir = label_dir
@@ -38,6 +46,7 @@ class GunDataset(torch.utils.data.Dataset):
         print(f"--- DATASET: Found {len(self.imgs)} images. Using {label_type.upper()} labels from {label_dir} ---")
 
     def __getitem__(self, idx):
+        # ### Load the image
         img_name = self.imgs[idx]
         img_path = os.path.join(self.img_dir, img_name)
         img = Image.open(img_path).convert("RGB")
@@ -45,6 +54,7 @@ class GunDataset(torch.utils.data.Dataset):
         img_tensor = transforms.functional.to_tensor(img)
 
         boxes = []
+        # ### PARSING LOGIC: Extracts coordinates based on file type
         if self.label_type == "xml":
             xml_path = os.path.join(self.label_dir, img_name.replace('.jpg', '.xml'))
             if os.path.exists(xml_path):
@@ -62,7 +72,7 @@ class GunDataset(torch.utils.data.Dataset):
                 with open(txt_path, "r") as f:
                     for line in f.readlines():
                         parts = list(map(float, line.strip().split()))
-                        # YOLO: class cx cy w h
+                        # ### Convert YOLO (center_x, center_y, w, h) to (xmin, ymin, xmax, ymax)
                         cx, cy, w, h = parts[1], parts[2], parts[3], parts[4]
                         xmin = (cx - w/2) * width
                         ymin = (cy - h/2) * height
@@ -80,16 +90,31 @@ class GunDataset(torch.utils.data.Dataset):
         return len(self.imgs)
 
 def get_model():
+    """
+    ### Model Architecture Builder
+    ### Reconstructs the exact Faster R-CNN + MobileNetV2 architecture used in training.
+    """
+    # ### Load MobileNetV2 backbone (feature extractor)
     model = models.mobilenet_v2(weights=None)
-    model.classifier = nn.Identity()
+    model.classifier = nn.Identity() # Remove classification layer
     backbone = model.features
     backbone.out_channels = 1280
+    
+    # ### Configure Anchor Generator (sizes of boxes the model looks for)
     anchor_generator = AnchorGenerator(sizes=((32, 64, 128, 256, 512),), aspect_ratios=((0.5, 1.0, 2.0),))
+    
+    # ### Configure Region of Interest (RoI) Aligner
     roi_pooler = MultiScaleRoIAlign(featmap_names=['0'], output_size=7, sampling_ratio=2)
+    
+    # ### Combine everything into the full Faster R-CNN model
     return FasterRCNN(backbone, num_classes=2, rpn_anchor_generator=anchor_generator, box_roi_pool=roi_pooler, min_size=224, max_size=896)
 
 def evaluate_model(model, dataloader, device):
-    model.eval()
+    """
+    ### Inference Loop
+    ### Runs the model on the test/validation set to get predictions.
+    """
+    model.eval() # Set to evaluation mode
     all_preds = []
     all_gts = []
     print("--- Running Inference ---")
@@ -98,17 +123,24 @@ def evaluate_model(model, dataloader, device):
             images = [img.to(device) for img in images]
             outputs = model(images)
             for i, output in enumerate(outputs):
+                # ### Store predictions (CPU) to save GPU memory
                 all_preds.append({'boxes': output['boxes'].cpu(), 'scores': output['scores'].cpu()})
                 all_gts.append(targets[i]['boxes'])
     return all_preds, all_gts
 
 def calculate_metrics(all_preds, all_gts):
+    """
+    ### Metrics Calculator
+    ### Compares Predictions vs Ground Truths to calculate Precision, Recall, and F1.
+    """
     tp_list, fp_list = [], []
     num_gt = 0
+    
     for pred, gt in zip(all_preds, all_gts):
         num_gt += len(gt)
         if len(pred['boxes']) == 0: continue
         
+        # ### Sort predictions by confidence score (high to low)
         sorted_indices = torch.argsort(pred['scores'], descending=True)
         p_boxes = pred['boxes'][sorted_indices]
         p_scores = pred['scores'][sorted_indices]
@@ -117,12 +149,14 @@ def calculate_metrics(all_preds, all_gts):
             for score in p_scores: fp_list.append((score.item(), 1))
             continue
             
+        # ### Calculate Intersection over Union (IoU)
         ious = box_iou(p_boxes, gt)
         gt_matched = set()
         
         for i, score in enumerate(p_scores):
             if ious.shape[1] > 0:
                 max_iou, max_idx = torch.max(ious[i], dim=0)
+                # ### Match if overlap > threshold and not already matched
                 if max_iou >= IOU_THRESHOLD and max_idx.item() not in gt_matched:
                     tp_list.append((score.item(), 1))
                     gt_matched.add(max_idx.item())
@@ -150,6 +184,10 @@ def calculate_metrics(all_preds, all_gts):
     return scores, precisions, recalls, f1s, num_gt, tps, fps
 
 def plot_results(scores, precisions, recalls, f1s, num_gt, tps, fps, csv_path):
+    """
+    ### Plot Generator
+    ### Creates 4 types of graphs: Loss curves, F1 curve, PR curve, and Confusion Matrices.
+    """
     sns.set_style("whitegrid")
     
     # --- A. LOSS CURVES (SMOOTHED) ---
@@ -158,7 +196,6 @@ def plot_results(scores, precisions, recalls, f1s, num_gt, tps, fps, csv_path):
             df = pd.read_csv(csv_path)
             plt.figure(figsize=(10, 6))
             
-            # Smoothing function
             def smooth(data, window=5):
                 return data.rolling(window=window, min_periods=1).mean()
 
@@ -193,7 +230,7 @@ def plot_results(scores, precisions, recalls, f1s, num_gt, tps, fps, csv_path):
     plt.tight_layout()
     plt.savefig("graph_f1_curve.png")
     
-    # --- C. PR CURVE ---
+    # --- C. PRECISION-RECALL CURVE ---
     plt.figure()
     plt.plot(recalls, precisions, linewidth=2.5, color='tab:blue')
     plt.title('Precision-Recall Curve')
@@ -206,21 +243,17 @@ def plot_results(scores, precisions, recalls, f1s, num_gt, tps, fps, csv_path):
     thresholds = [0.5, 0.65, 0.8]
     
     for conf in thresholds:
-        # Filter predictions based on current loop threshold
         threshold_mask = scores > conf
         final_tp, final_fp = 0, 0
         
         if np.any(threshold_mask):
-            # Find the last index that satisfies the condition (since arrays are sorted by score)
             idx = np.where(threshold_mask)[0][-1]
             final_tp = int(tps[idx])
             final_fp = int(fps[idx])
             
         final_fn = int(num_gt - final_tp)
-        final_tn = 0 # TN is always 0 in detection tasks (infinite background)
+        final_tn = 0 
         
-        # Row 0: Gun(True) -> [TP, FN]
-        # Row 1: Bg(True)  -> [FP, TN]
         matrix = [[final_tp, final_fn], [final_fp, final_tn]]
         
         plt.figure(figsize=(6, 5))
@@ -233,10 +266,9 @@ def plot_results(scores, precisions, recalls, f1s, num_gt, tps, fps, csv_path):
         plt.xlabel("Predicted Label")
         plt.tight_layout()
         
-        # Save with unique filename
         filename = f"graph_confusion_matrix_{conf}.png"
         plt.savefig(filename)
-        plt.close() # Close figure to free memory
+        plt.close()
         print(f"Saved {filename}")
 
     print("Saved all graphs.")
