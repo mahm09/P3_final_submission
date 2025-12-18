@@ -3,7 +3,7 @@
 ## Project Overview
 This repository contains the final implementation and trained models for a comparative study of object detection and pose estimation architectures. The project evaluates the performance difference between single-stage detectors (YOLOv8) and two-stage detectors (Faster R-CNN with a MobileNetV2 backbone (itself with a MediaPipe wrist cropping system)). During the project, another repository was used. This was cleaned up for submission, with some testing files, the dataset, and various other programs not making the final cut. As a result, it is possible that the programs do not currently have full functionality, as they did in our working project folder. These programs are merely intended to showcase the implementation.
 
-The repository also contains a folder with an example implementation of the deployment method described in the report, with it's own requirements.txt file, a sample image to try, and a sample result recieved from the API server, among other things. The Docker server host must be running for this to work.
+The repository also contains a folder (deployment/attachments) with an example implementation of the deployment method described in the report, with it's own requirements.txt file, a sample image to try, and a sample result recieved from the API server, among other things. The Docker server host must be running for this to work.
 
 ## Included Models
 The `P3_Final_Submission` folder includes the best-performing weights from our training sessions:
