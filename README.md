@@ -1,14 +1,14 @@
 # Computer Vision Model Comparison: YOLOv8 vs Faster R-CNN vs MobileNet
 
 ## Project Overview
-This repository contains the final implementation and trained models for a comparative study of object detection and pose estimation architectures. The project evaluates the performance difference between single-stage detectors (YOLOv8), two-stage detectors (Faster R-CNN), and lightweight architectures (MobileNet/MediaPipe).
+This repository contains the final implementation and trained models for a comparative study of object detection and pose estimation architectures. The project evaluates the performance difference between single-stage detectors (YOLOv8) and two-stage detectors (Faster R-CNN with a MobileNetV2 backbone (itself with a MediaPipe wrist cropping system)).
 
 ## Included Models
 The `P3_Final_Submission` folder includes the best-performing weights from our training sessions:
 
 * **`best_yolo.pt`**: The optimal weights obtained from training **YOLOv8** (via Ultralytics). This model offers a balance of high speed and accuracy.
-* **`best_frcnn.pth`**: The best checkpoint for the **Faster R-CNN** (ResNet50 backbone) model, trained using PyTorch. This model typically provides higher accuracy for small objects.
-* **`best_mobilenet.pth`**: The trained weights for the **MobileNet** based architecture, optimized for efficient pose estimation and lightweight detection.
+* **`best_frcnn.pth`**: The best checkpoint for the **Faster R-CNN** (MobileNetV2 backbone) model, trained using PyTorch. 
+* **`best_mobilenet.pth`**: The trained weights for the **MobileNet** based architecture, (theoretically) optimized for efficient pose estimation and detection.
 
 ## Installation
 

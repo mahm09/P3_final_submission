@@ -42,6 +42,11 @@ results = model.predict(
     save=True  # automatically saves predicted images
 )
 
+# ---------------------------
+# The boilerplate below was written with the help of AI. It was reviewed, tested, and modified to suit project-specific needs.
+# ---------------------------
+
+
 # Move predictions to custom folder
 output_folder = './yolo_results_test'
 os.makedirs(output_folder, exist_ok=True)
