@@ -154,4 +154,136 @@ def calculate_metrics(all_preds, all_gts):
         gt_matched = set()
         
         for i, score in enumerate(p_scores):
-            if ious.shape
+            if ious.shape[1] > 0:
+                max_iou, max_idx = torch.max(ious[i], dim=0)
+                # ### Match if overlap > threshold and not already matched
+                if max_iou >= IOU_THRESHOLD and max_idx.item() not in gt_matched:
+                    tp_list.append((score.item(), 1))
+                    gt_matched.add(max_idx.item())
+                else: fp_list.append((score.item(), 1))
+            else: fp_list.append((score.item(), 1))
+
+    print(f"DEBUG: Found {num_gt} Ground Truths and {len(tp_list)} True Positives.")
+    if num_gt == 0: return np.array([]), np.array([]), np.array([]), np.array([]), 0, np.array([]), np.array([])
+
+    tp_data = np.array(tp_list) if tp_list else np.zeros((0, 2))
+    fp_data = np.array(fp_list) if fp_list else np.zeros((0, 2))
+    
+    tp_block = np.column_stack([tp_data[:, 0], np.ones(len(tp_data)), np.zeros(len(tp_data))]) if len(tp_data)>0 else np.zeros((0,3))
+    fp_block = np.column_stack([fp_data[:, 0], np.zeros(len(fp_data)), np.ones(len(fp_data))]) if len(fp_data)>0 else np.zeros((0,3))
+
+    all_dets = np.vstack([tp_block, fp_block])
+    if len(all_dets) > 0: all_dets = all_dets[np.argsort(all_dets[:, 0])[::-1]]
+        
+    tps = np.cumsum(all_dets[:, 1])
+    fps = np.cumsum(all_dets[:, 2])
+    precisions = tps / (tps + fps + 1e-6)
+    recalls = tps / (num_gt + 1e-6)
+    scores = all_dets[:, 0]
+    f1s = 2 * (precisions * recalls) / (precisions + recalls + 1e-6)
+    return scores, precisions, recalls, f1s, num_gt, tps, fps
+
+def plot_results(scores, precisions, recalls, f1s, num_gt, tps, fps, csv_path):
+    """
+    ### Plot Generator
+    ### Creates 4 types of graphs: Loss curves, F1 curve, PR curve, and Confusion Matrices.
+    """
+    sns.set_style("whitegrid")
+    
+    # --- A. LOSS CURVES (SMOOTHED) ---
+    if os.path.exists(csv_path):
+        try:
+            df = pd.read_csv(csv_path)
+            plt.figure(figsize=(10, 6))
+            
+            def smooth(data, window=5):
+                return data.rolling(window=window, min_periods=1).mean()
+
+            plt.plot(df['epoch'], smooth(df['box_loss']), label='Train Box Loss', color='tab:blue', linewidth=2.5)
+            plt.plot(df['epoch'], smooth(df['cls_loss']), label='Train Cls Loss', color='tab:orange', linewidth=2.5)
+            plt.plot(df['epoch'], df['box_loss'], color='tab:blue', alpha=0.2)
+            plt.plot(df['epoch'], df['cls_loss'], color='tab:orange', alpha=0.2)
+
+            plt.ylabel('Loss')
+            plt.xlabel('Epoch')
+            plt.legend(loc='upper left')
+            
+            ax2 = plt.gca().twinx()
+            ax2.plot(df['epoch'], smooth(df['val_mean_iou']), color='black', linestyle='--', linewidth=2, label='Val Mean IoU')
+            ax2.set_ylabel('IoU (Higher is Better)')
+            ax2.legend(loc='upper right')
+            
+            plt.title('R-CNN Training Losses (Smoothed)')
+            plt.tight_layout()
+            plt.savefig("graph_losses.png")
+            print("Saved graph_losses.png")
+        except: print("Could not read CSV.")
+
+    if len(scores) == 0: return
+
+    # --- B. F1 CURVE ---
+    plt.figure()
+    plt.plot(scores, f1s, linewidth=2.5, color='tab:purple')
+    plt.title('F1-Confidence Curve')
+    plt.xlabel('Confidence'); plt.ylabel('F1 Score')
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig("graph_f1_curve.png")
+    
+    # --- C. PRECISION-RECALL CURVE ---
+    plt.figure()
+    plt.plot(recalls, precisions, linewidth=2.5, color='tab:blue')
+    plt.title('Precision-Recall Curve')
+    plt.xlabel('Recall'); plt.ylabel('Precision')
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig("graph_pr_curve.png")
+
+    # --- D. CONFUSION MATRICES (Loop for 0.5, 0.65, 0.8) ---
+    thresholds = [0.5, 0.65, 0.8]
+    
+    for conf in thresholds:
+        threshold_mask = scores > conf
+        final_tp, final_fp = 0, 0
+        
+        if np.any(threshold_mask):
+            idx = np.where(threshold_mask)[0][-1]
+            final_tp = int(tps[idx])
+            final_fp = int(fps[idx])
+            
+        final_fn = int(num_gt - final_tp)
+        final_tn = 0 
+        
+        matrix = [[final_tp, final_fn], [final_fp, final_tn]]
+        
+        plt.figure(figsize=(6, 5))
+        sns.heatmap(matrix, annot=True, fmt='d', cmap='Blues', 
+                    xticklabels=["Gun (Pred)", "Bg (Pred)"], 
+                    yticklabels=["Gun (True)", "Bg (True)"])
+        
+        plt.title(f"Confusion Matrix (Conf > {conf})")
+        plt.ylabel("True Label")
+        plt.xlabel("Predicted Label")
+        plt.tight_layout()
+        
+        filename = f"graph_confusion_matrix_{conf}.png"
+        plt.savefig(filename)
+        plt.close()
+        print(f"Saved {filename}")
+
+    print("Saved all graphs.")
+
+def main():
+    dataset = GunDataset(IMG_DIR, LABEL_DIR, LABEL_TYPE)
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=4, collate_fn=lambda x: tuple(zip(*x)))
+    print("Loading model...")
+    model = get_model()
+    model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
+    model.to(DEVICE)
+    all_preds, all_gts = evaluate_model(model, dataloader, DEVICE)
+    print("Calculating metrics...")
+    scores, precisions, recalls, f1s, num_gt, tps, fps = calculate_metrics(all_preds, all_gts)
+    plot_results(scores, precisions, recalls, f1s, num_gt, tps, fps, CSV_PATH)
+
+if __name__ == "__main__":
+    main()
