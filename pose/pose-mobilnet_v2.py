@@ -8,7 +8,8 @@ import mediapipe as mp
 
 print("Setting up Visualization (Headless)...")
 import matplotlib
-# THIS IS THE FIX: Tell matplotlib not to look for a screen
+# below was written with the help of AI
+#  Tell matplotlib not to look for a screen 
 matplotlib.use('Agg') 
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -44,7 +45,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 
 
-#  Convertere fra  YOLO format til pixel coordinates
+# below  was written with the help of AI Convertere fra  YOLO format til pixel coordinates
 def yolo_to_bbox(yolo_line, img_width, img_height):
    
     parts = yolo_line.strip().split()
@@ -457,7 +458,7 @@ def main():
     # Step 2: Create datasets
     print("\n[2/5] Creating datasets...")
     
-    # ✅ DATA AUGMENTATION for training set
+    #  DATA AUGMENTATION for training set
     train_transform = transforms.Compose([
         transforms.ToPILImage(),
         transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
