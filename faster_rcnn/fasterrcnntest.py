@@ -1,3 +1,10 @@
+# ==============================================================================
+# DISCLAIMER:
+# The boilerplate for this script was written with the help of AI.
+# It was reviewed, tested, and modified by the project group to suit 
+# project-specific data structures and requirements.
+# ==============================================================================
+
 import os
 import csv
 import torch
@@ -12,19 +19,23 @@ from PIL import Image
 import numpy as np
 
 # ============================================================
-# CONFIG
+# CONFIGURATION
 # ============================================================
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 
+# ### Dataset Paths
 DATA_DIR = os.path.join(PROJECT_DIR, "billeddata")
 TRAIN_DIR = os.path.join(DATA_DIR, "train")
 VAL_DIR   = os.path.join(DATA_DIR, "val")
 
+# ### Path to the Pre-trained Backbone (MobileNet)
+# ### This assumes you have already trained a classifier and saved it here.
 MOBILENET_PATH = os.path.join(PROJECT_DIR, "output", "best_model.pth")
 OUTPUT_DIR = os.path.join(PROJECT_DIR, "frcnn_output")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-NUM_CLASSES = 2  # 1 gun + background
+# ### Hyperparameters
+NUM_CLASSES = 2  # 2 classes: 0=background, 1=gun
 BATCH_SIZE = 8
 NUM_EPOCHS = 50
 LEARNING_RATE = 0.0003
@@ -32,9 +43,13 @@ LEARNING_RATE = 0.0003
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # ============================================================
-# YOLO → FRCNN DATASET
+# CUSTOM DATASET: YOLO to FASTER R-CNN
 # ============================================================
 class YOLO2FRCNNDataset(Dataset):
+    """
+    ### This class loads images and converts YOLO labels (.txt) 
+    ### into the Pascal VOC format (xmin, ymin, xmax, ymax) required by Faster R-CNN.
+    """
     def __init__(self, root_dir):
         self.root_dir = root_dir
         self.img_dir = os.path.join(root_dir, "images")
@@ -54,6 +69,7 @@ class YOLO2FRCNNDataset(Dataset):
     def __getitem__(self, idx):
         img_name = self.images[idx]
         img_path = os.path.join(self.img_dir, img_name)
+        # ### Assumes label file has same name as image but with .txt extension
         lbl_path = os.path.join(self.lbl_dir, os.path.splitext(img_name)[0] + ".txt")
 
         img = Image.open(img_path).convert("RGB")
@@ -65,13 +81,16 @@ class YOLO2FRCNNDataset(Dataset):
         if os.path.exists(lbl_path):
             with open(lbl_path, "r") as f:
                 for line in f.readlines():
+                    # ### Read normalized YOLO coordinates (center_x, center_y, width, height)
                     cls, cx, cy, bw, bh = map(float, line.strip().split())
+                    
+                    # ### Convert to absolute pixel coordinates (xmin, ymin, xmax, ymax)
                     xmin = (cx - bw / 2) * w
                     ymin = (cy - bh / 2) * h
                     xmax = (cx + bw / 2) * w
                     ymax = (cy + bh / 2) * h
                     boxes.append([xmin, ymin, xmax, ymax])
-                    labels.append(1)  # class "gun"
+                    labels.append(1)  # Always Class 1 for "Gun" (0 is reserved for background)
 
         target = {
             "boxes": torch.tensor(boxes, dtype=torch.float32),
@@ -82,10 +101,13 @@ class YOLO2FRCNNDataset(Dataset):
 
 
 def collate_fn(batch):
+    """
+    ### Custom batch handler needed because images/boxes have different sizes.
+    """
     return tuple(zip(*batch))
 
 # ============================================================
-# MOBILE-NET BACKBONE LOADER
+# BACKBONE LOADER
 # ============================================================
 def try_load_state_dict(model, state_dict):
     try:
@@ -96,9 +118,14 @@ def try_load_state_dict(model, state_dict):
 
 
 def load_mobilenet_backbone(mobilenet_path, device):
+    """
+    ### Loads the pre-trained MobileNetV2 model to use as the 'eyes' (Feature Extractor)
+    ### for the Faster R-CNN detector.
+    """
     if not os.path.exists(mobilenet_path):
         raise FileNotFoundError(f"MobileNet checkpoint not found: {mobilenet_path}")
 
+    # ### Load weights
     raw = torch.load(mobilenet_path, map_location="cpu")
     if isinstance(raw, dict) and "state_dict" in raw:
         state_dict = raw["state_dict"]
@@ -107,8 +134,9 @@ def load_mobilenet_backbone(mobilenet_path, device):
     else:
         raise RuntimeError("Unrecognized checkpoint format.")
 
+    # ### Rebuild the backbone architecture
     model = models.mobilenet_v2(weights=None)
-    model.classifier = nn.Identity()  # remove classifier
+    model.classifier = nn.Identity()  # Remove the old classification head
 
     ok, msg = try_load_state_dict(model, state_dict)
     if not ok:
@@ -116,6 +144,8 @@ def load_mobilenet_backbone(mobilenet_path, device):
 
     model = model.to(device)
     backbone = model.features
+    
+    # ### Determine output channels (usually 1280 for MobileNetV2)
     dummy = torch.randn(1, 3, 224, 224).to(device)
     with torch.no_grad():
         out = backbone(dummy)
@@ -124,9 +154,12 @@ def load_mobilenet_backbone(mobilenet_path, device):
     return backbone, backbone.out_channels
 
 # ============================================================
-# UTILITY: IoU for validation
+# UTILITY: IoU Calculation
 # ============================================================
 def compute_iou(box1, box2):
+    """
+    ### Calculates Intersection over Union (IoU) to validate accuracy.
+    """
     xA = max(box1[0], box2[0])
     yA = max(box1[1], box2[1])
     xB = min(box1[2], box2[2])
@@ -160,17 +193,20 @@ def main():
     )
 
     print("Building FasterRCNN model...")
+    # ### Configure the Anchor Generator (box sizes the model will try to fit)
     anchor_generator = AnchorGenerator(
         sizes=((32, 64, 128, 256, 512),),
         aspect_ratios=((0.5, 1.0, 2.0),)
     )
 
+    # ### Configure the RoI Pooler (aligns features to boxes)
     roi_pooler = MultiScaleRoIAlign(
         featmap_names=['0'],
         output_size=7,
         sampling_ratio=2
     )
 
+    # ### Assemble the full detector
     model = FasterRCNN(
         backbone,
         num_classes=NUM_CLASSES,
@@ -183,7 +219,7 @@ def main():
     optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.5)
 
-    # Epoch-level CSV log
+    # ### Create CSV log file
     loss_log_path = os.path.join(OUTPUT_DIR, "training_losses.csv")
     with open(loss_log_path, "w", newline="") as f:
         writer = csv.writer(f)
@@ -192,6 +228,7 @@ def main():
     best_iou = 0.0
     print("Starting training...")
 
+    # ### ---------------- TRAINING LOOP ---------------- ###
     for epoch in range(NUM_EPOCHS):
         model.train()
         epoch_loss = 0.0
@@ -200,9 +237,11 @@ def main():
             imgs = [img.to(DEVICE) for img in imgs]
             targets = [{k: v.to(DEVICE) for k, v in t.items()} for t in targets]
 
+            # ### Calculate Loss
             loss_dict = model(imgs, targets)
             losses = sum(loss_dict.values())
 
+            # ### Backpropagation
             optimizer.zero_grad()
             losses.backward()
             optimizer.step()
@@ -211,9 +250,7 @@ def main():
 
         scheduler.step()
 
-        # =====================
-        # Validation
-        # =====================
+        # ### ---------------- VALIDATION LOOP ---------------- ###
         model.eval()
         iou_scores = []
         with torch.no_grad():
@@ -221,36 +258,34 @@ def main():
                 imgs = [img.to(DEVICE) for img in imgs]
                 outputs = model(imgs)
 
+                # ### Compare Predictions to Ground Truth
                 for out, tgt in zip(outputs, targets):
                     pred_boxes = out["boxes"].cpu().numpy()
                     gt_boxes = tgt["boxes"].numpy()
                     for pb in pred_boxes:
+                        # ### Calculate Max IoU for this prediction
                         iou = max(compute_iou(pb, gt_box) for gt_box in gt_boxes) if len(gt_boxes) > 0 else 0
                         iou_scores.append(iou)
 
         mean_iou = np.mean(iou_scores)
         print(f"Epoch {epoch+1}/{NUM_EPOCHS} completed. Total loss: {epoch_loss:.4f}, Validation mean IoU: {mean_iou:.4f}")
 
-        # Save best model
+        # ### Save Best Model
         if mean_iou > best_iou:
             best_iou = mean_iou
             best_path = os.path.join(OUTPUT_DIR, "best_model.pth")
             torch.save(model.state_dict(), best_path)
             print(f"Saved best model with IoU {best_iou:.4f} to {best_path}")
 
-    
-        
-
-        # Log epoch-level metrics to CSV
+        # ### Log Metrics to CSV
         with open(loss_log_path, "a", newline="") as f:
             writer = csv.writer(f)
-            # We use .get() to avoid crashing if a key is missing
             writer.writerow([
                 epoch + 1,
-                epoch_loss,
-                loss_dict.get("loss_classifier", torch.tensor(0)).item(),
+                epoch_loss, # Sum of losses for the entire epoch
+                loss_dict.get("loss_classifier", torch.tensor(0)).item(), # Snapshot of last batch
                 loss_dict.get("loss_box_reg", torch.tensor(0)).item(),
-                loss_dict.get("loss_objectness", torch.tensor(0)).item(), # <--- FIXED NAME
+                loss_dict.get("loss_objectness", torch.tensor(0)).item(),
                 mean_iou
             ])
 
